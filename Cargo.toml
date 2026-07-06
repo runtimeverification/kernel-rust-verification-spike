@@ -1,0 +1,14 @@
+[package]
+name = "spike_binder"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0"
+
+# Standalone extraction of the Linux Rust Binder driver's binder-object
+# deserialization logic, for a Charon (Aeneas) extraction feasibility spike.
+# Builds with stable cargo; no kernel crate, no no_std.
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]

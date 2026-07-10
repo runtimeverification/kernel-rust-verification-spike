@@ -1,69 +1,55 @@
-# Kernel Rust verification spike: Binder → Charon → LLBC
+# Kernel Rust verification spike: Binder → Lean 4
 
-Can parsing code from the Linux kernel's Rust Binder driver be extracted,
-unmodified, into LLBC — the input language of the Aeneas verification
-toolchain (Rust → Lean 4)?
+Can the Linux kernel's Rust Binder driver be verified post hoc, through the
+Charon/Aeneas toolchain (Rust → LLBC → Lean 4)? Target property, from the
+Binder maintainer: for all inputs from userspace, the code must not panic.
 
-**Result: yes, on the first attempt.** The BinderObject deserializer
-(drivers/android/binder/allocation.rs, v7.2-rc2) — including union
-type-punning, MaybeUninit, a raw-pointer cast, and unsafe blocks — was
-extracted by Charon with zero changes to the parsing logic. Only the
-ambient kernel environment (the `kernel` crate, bindgen'd UAPI, the
-userspace reader) was replaced with a thin stub layer, marked
-`// SPIKE-STUB` in the source.
+**Status.**
+- Charon extracts the BinderObject deserializer
+  (drivers/android/binder/allocation.rs, v7.2-rc2) with zero changes to the
+  parsing logic. Only the kernel environment (kernel crate, bindgen'd UAPI,
+  userspace reader) is stubbed, marked `// SPIKE-STUB` in the source.
+  Details: [CHARON-REPORT.md](CHARON-REPORT.md).
+- Aeneas rejects the union type-punning at the core of the deserializer, so
+  the parsing functions get no Lean at all. Upstream issue:
+  https://github.com/AeneasVerif/aeneas/issues/1199
+- The union-free validators translate, and no-panic is proved for three of
+  them (`size_check` unconditionally). Theorems: [lean/NoPanic.lean](lean/NoPanic.lean).
+  Details: [AENEAS-REPORT.md](AENEAS-REPORT.md).
 
-## Why
+## Layout
 
-Binder parses untrusted bytes from arbitrary userspace apps. We want to
-prove, in Lean 4 with kernel-checked proofs, that this parsing is correct:
-bounds checks, tag validation, canonicity. This spike measures the first
-step: the distance between kernel Rust and the verification toolchain.
+- `src/` — the extracted crate, parsing logic byte-for-byte from the kernel
+- `reduced/` — union-free subset that Aeneas accepts
+- `lean/` — generated Lean 4 code + no-panic theorems (Lake project)
+- `llbc/` — Charon artifacts
+- `CHARON-REPORT.md`, `AENEAS-REPORT.md` — full results for each stage
 
 ## Reproduce
 
-Verified with `rustc`/`cargo` 1.94.0 (stable) on Linux x86-64. The
-`charon cargo` step produced `llbc/spike_binder.llbc` (checked into this
-repo) with exit 0, zero warnings, zero errors.
-
 ```sh
-# 1. Reference the kernel source the parsing logic was copied from (v7.2-rc2).
-#    Only needed to diff against the original; the crate itself is self-contained.
-git clone --depth 1 --branch v7.2-rc2 \
-    https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git ~/linux
-
-# 2. Build Charon from the exact commit used for this spike.
-#    Its pinned toolchain (rust-toolchain: nightly-2026-06-01 + rustc-dev) is
-#    fetched automatically by rustup during the build.
+# Charon at commit 909ff09a (v0.1.220, the version Aeneas pins), Aeneas c2015b86
 git clone https://github.com/AeneasVerif/charon.git ~/charon
-cd ~/charon
-git checkout 19e3f85a32e02ef00664fa325bbbf157678be530
-make build-charon-rust          # produces ~/charon/bin/{charon,charon-driver}
-~/charon/bin/charon version     # -> 0.1.219
+cd ~/charon && git checkout 909ff09a && make build-charon-rust
 
-# 3. Build the crate and extract it to LLBC.
-cd <this-repo>
-cargo build                     # stable toolchain; builds clean
-cargo test                      # 3/3 tests pass
-PATH="$HOME/charon/bin:$PATH" charon cargo   # -> spike_binder.llbc
-
-# 4. (Optional) Pretty-print the extracted LLBC.
-~/charon/bin/charon pretty-print spike_binder.llbc | less
+cargo test                                        # 3/3
+charon cargo --preset=aeneas                      # full crate -> llbc; Aeneas then fails on unions
+cd reduced && charon cargo --preset=aeneas        # union-free crate -> translates
+aeneas -backend lean llbc/spike_binder_reduced-charon-909ff09a-v0.1.220.llbc -dest lean/
+cd lean && lake build                             # typechecks generated code + theorems
 ```
 
-- **Kernel:** v7.2-rc2
-- **Charon:** v0.1.219, commit `19e3f85a32e02ef00664fa325bbbf157678be530`
-  (pinned toolchain `nightly-2026-06-01`)
-- **Crate toolchain:** stable `rustc`/`cargo` 1.94.0
+Kernel v7.2-rc2, Lean/mathlib v4.31.0, stable rustc 1.94.0. Aeneas requires
+`--preset=aeneas` at extraction time.
 
-## What's next
+## Next
 
-- Aeneas → Lean 4 on the extracted LLBC; first proofs of tag-rejection
-  and bounds-check properties
-- Second target: nova-core MCTP/VBIOS parsers
-- The real prize: the offset-validation loop in copy_transaction_data
-  (larger stub surface — see REPORT.md, section e)
+- Union-free re-modelling of BinderObject (`[u8; 40]` + typed accessors),
+  type-pun invariants as explicit Lean propositions — the path to no-panic
+  on `parse_one`
+- Coverage map: the rest of the kernel's Rust through both pipeline stages
 
 ## Who
 
-Runtime Verification, Inc. Questions and comments welcome — via issues
-or the Zulip thread (link TBA).
+Runtime Verification, Inc. Issues welcome, or the
+[Rust-for-Linux Zulip thread](https://rust-for-linux.zulipchat.com/#narrow/channel/288089-General/topic/Verifying.20Binder.27s.20parsing.20of.20userspace.20input.20in.20Lean.204/with/608640073).

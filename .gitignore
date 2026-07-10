@@ -1,2 +1,10 @@
 /target
 Cargo.lock
+
+# reduced union-free crate (Aeneas workaround) build artifacts
+/reduced/target
+/reduced/Cargo.lock
+
+# Lean project build artifacts
+/lean/.lake
+/lean/lake-manifest.json

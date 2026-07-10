@@ -1,0 +1,28 @@
+[package]
+name = "spike_binder_reduced"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0"
+
+# REDUCED / UNION-FREE extraction of the spike_binder crate, produced *only*
+# because Aeneas (LLBC -> Lean) rejects `union` types outright
+# (TypesAnalysis.ml:514, "unions are not supported"), which aborts translation
+# of the whole crate before any Lean is emitted. See AENEAS-REPORT.md.
+#
+# This crate contains ONLY the union-free functions from the parent crate,
+# byte-for-byte where possible:
+#   * ptr_align, is_aligned, size_check  -- pure validators, no types at all
+#   * type_to_size                       -- reads sizes of the uapi structs
+#
+# The uapi structs here have their anonymous `union { u64; u32 }` fields
+# replaced by a plain `u64` (the union's largest/only-8-byte member on a 64-bit
+# target). #[repr(C)] size and alignment are therefore IDENTICAL to the real
+# structs, so `size_of::<T>()` -- and hence `type_to_size` -- is byte-for-byte
+# equivalent. The union-based deserializer core (BinderObject, read_from,
+# read_from_inner, as_ref, size, parse_one) is NOT present: it cannot be
+# represented without unions.
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]

@@ -16,14 +16,22 @@ Binder maintainer: for all inputs from userspace, the code must not panic.
 - The union-free validators translate, and no-panic is proved for three of
   them (`size_check` unconditionally). Theorems: [lean/NoPanic.lean](lean/NoPanic.lean).
   Details: [AENEAS-REPORT.md](AENEAS-REPORT.md).
+- A union-free re-modelling (`[u8; 40]` + typed accessors, per
+  [AeneasVerif/aeneas#1199](https://github.com/AeneasVerif/aeneas/issues/1199))
+  makes the **whole** deserializer translate to Lean. No-panic is proved for the
+  accessors, reader primitives, `size`, and validators; `parse_one` is reduced
+  to one mechanical goal over concrete, fail-free control flow.
+  Theorems: [lean/NoPanicRemodel.lean](lean/NoPanicRemodel.lean).
+  Details: [REMODEL-REPORT.md](REMODEL-REPORT.md).
 
 ## Layout
 
 - `src/` — the extracted crate, parsing logic byte-for-byte from the kernel
-- `reduced/` — union-free subset that Aeneas accepts
+- `reduced/` — union-free subset (validators only) that Aeneas accepts
+- `remodel/` — union-free re-modelling of the full deserializer (`[u8; 40]` + accessors)
 - `lean/` — generated Lean 4 code + no-panic theorems (Lake project)
 - `llbc/` — Charon artifacts
-- `CHARON-REPORT.md`, `AENEAS-REPORT.md` — full results for each stage
+- `CHARON-REPORT.md`, `AENEAS-REPORT.md`, `REMODEL-REPORT.md` — results per stage
 
 ## Reproduce
 
@@ -44,9 +52,10 @@ Kernel v7.2-rc2, Lean/mathlib v4.31.0, stable rustc 1.94.0. Aeneas requires
 
 ## Next
 
-- Union-free re-modelling of BinderObject (`[u8; 40]` + typed accessors),
-  type-pun invariants as explicit Lean propositions — the path to no-panic
-  on `parse_one`
+- Close the final mechanical step in `parse_one_no_panic` (a `step`/reduction
+  gap on tuple-pattern monadic binds — see REMODEL-REPORT.md §6)
+- Upstream union support in Aeneas (issue #1199) — the faithful alternative to
+  re-modelling
 - Coverage map: the rest of the kernel's Rust through both pipeline stages
 
 ## Who

@@ -1,0 +1,26 @@
+[package]
+name = "spike_binder_remodel"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0"
+
+# UNION-FREE RE-MODELLING of the Binder BinderObject deserializer, designed so
+# Aeneas (which rejects `union` types) can translate the *whole* parsing path —
+# read_from / read_from_inner / typed accessors / parse_one — to Lean, enabling a
+# machine-checked no-panic theorem on parse_one.
+#
+# Design agreed with the Aeneas authors in
+#   https://github.com/AeneasVerif/aeneas/issues/1199
+# represent the object as a byte array `[u8; 40]` with typed accessor functions;
+# the C `union` type-punning becomes explicit byte reads at fixed offsets, and the
+# layout invariants become explicit propositions rather than being implicit in the
+# translation.
+#
+# Fidelity to the kernel original (../src/lib.rs) is pinned by compile-time
+# `offset_of!`/`size_of` assertions against the real #[repr(C)] structs; every
+# intentional deviation is marked `// REMODEL: <reason>`.
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]

@@ -5,6 +5,10 @@ Cargo.lock
 /reduced/target
 /reduced/Cargo.lock
 
+# remodel union-free crate build artifacts
+/remodel/target
+/remodel/Cargo.lock
+
 # Lean project build artifacts
 /lean/.lake
 /lean/lake-manifest.json

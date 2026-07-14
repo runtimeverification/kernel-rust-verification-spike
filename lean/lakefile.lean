@@ -14,3 +14,7 @@ package «spike_binder_verif» where
 @[default_target] lean_lib «SpikeBinderReduced» where
 
 @[default_target] lean_lib «NoPanic» where
+
+@[default_target] lean_lib «SpikeBinderRemodel» where
+
+@[default_target] lean_lib «NoPanicRemodel» where

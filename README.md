@@ -18,9 +18,11 @@ Binder maintainer: for all inputs from userspace, the code must not panic.
   Details: [AENEAS-REPORT.md](AENEAS-REPORT.md).
 - A union-free re-modelling (`[u8; 40]` + typed accessors, per
   [AeneasVerif/aeneas#1199](https://github.com/AeneasVerif/aeneas/issues/1199))
-  makes the **whole** deserializer translate to Lean. No-panic is proved for the
-  accessors, reader primitives, `size`, and validators; `parse_one` is reduced
-  to one mechanical goal over concrete, fail-free control flow.
+  makes the **whole** deserializer translate to Lean, and the maintainer's
+  target is **proved**: `parse_one_no_panic` — for all byte inputs, `parse_one`
+  returns `ok`, never `fail` — machine-checked and `sorryAx`-free (modulo the
+  opaque `size_of` axiom). No-panic is likewise proved for the accessors, reader
+  primitives, `size`/`type_to_size`, and validators.
   Theorems: [lean/NoPanicRemodel.lean](lean/NoPanicRemodel.lean).
   Details: [REMODEL-REPORT.md](REMODEL-REPORT.md).
 
@@ -52,10 +54,10 @@ Kernel v7.2-rc2, Lean/mathlib v4.31.0, stable rustc 1.94.0. Aeneas requires
 
 ## Next
 
-- Close the final mechanical step in `parse_one_no_panic` (a `step`/reduction
-  gap on tuple-pattern monadic binds — see REMODEL-REPORT.md §6)
+- Discharge the opaque `size_of` axiom (model `core.mem.size_of` as a concrete
+  constant) so `parse_one_no_panic` depends only on the standard Lean axioms
 - Upstream union support in Aeneas (issue #1199) — the faithful alternative to
-  re-modelling
+  re-modelling, so the *original* deserializer verifies without the byte-array remodel
 - Coverage map: the rest of the kernel's Rust through both pipeline stages
 
 ## Who

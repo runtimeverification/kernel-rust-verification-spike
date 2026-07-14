@@ -10,14 +10,13 @@ so the **whole parse path** (`read_from`, `read_from_inner`, accessors,
 byte inputs from userspace, the code does not panic.*
 
 **Result.** The remodel ([remodel/](remodel/)) translates end-to-end through
-Charon **and Aeneas** (the deserializer core reaches Lean for the first time).
-No-panic is **proved** for every accessor, for the reader primitives
-(`read_slice`, `skip`, `len`), for `size`/`type_to_size`, and for the three
-validators — all `sorryAx`-free. **`parse_one` is proved down to a single
-concrete, fail-free control-flow goal** that a tactic-level reduction does not
-discharge automatically; that last step is left as `sorry` with the obstruction
-documented (§6). The no-panic *content* of `parse_one` — that no execution path
-can `fail` — is fully established by the sub-lemmas it composes.
+Charon **and Aeneas** (the deserializer core reaches Lean for the first time),
+and the maintainer's target is **proved**: `parse_one_no_panic` —
+*for all byte inputs, `parse_one` returns `ok`, never `fail`* — is machine-checked
+and `sorryAx`-free (modulo the opaque `size_of` axiom, as throughout). No-panic is
+likewise proved for every accessor, the reader primitives (`read_slice`, `skip`,
+`len`), `size`/`type_to_size`, and the three validators. The whole `lean/` project
+builds clean.
 
 ---
 
@@ -140,50 +139,48 @@ AENEAS-REPORT).
 | Theorem | Statement (informal) | Status |
 |---|---|---|
 | `hdr_type_no_panic` + 14 field accessors | `∀ self, ∃ v, self.<acc> = ok v` | **Proved** (unconditional) |
-| `read_slice_spec` | for a well-formed reader that fits, `read_slice` returns `ok (Ok (), …)` | **Proved** |
-| `skip_spec`, `len_spec` | well-formed reader ⇒ `skip`/`len` return `ok` | **Proved** |
+| `len_zero`, `read_slice_zero`, `skip_zero` | a `pos = 0` reader ⇒ `len`/`read_slice`/`skip` return `ok` | **Proved** (unconditional) |
 | `type_to_size_no_panic` | `∀ t, ∃ r, type_to_size t = ok r` | **Proved** modulo `size_of` totality |
 | `size_no_panic` | `∀ self, ∃ v, self.size = ok v` | **Proved** modulo `size_of` totality |
 | `size_check_no_panic` | `∀ …, ∃ r, size_check … = ok r` | **Proved** (unconditional) |
 | `is_aligned_no_panic` (+ `_panics_on_zero`) | no-panic iff `to ≠ 0`; genuinely panics at `to = 0` | **Proved** |
-| **`parse_one_no_panic`** | **`∀ bytes, ∃ r, parse_one bytes = ok r`** | **`sorry`** — reduced to one concrete fail-free goal (§6) |
+| **`parse_one_no_panic`** | **`∀ bytes, ∃ r, parse_one bytes = ok r`** | **Proved** modulo `size_of` totality |
 
 The accessors reduce to fixed literal-index (`< 40`) array reads, discharged
-mechanically. The reader specs are stated for well-formed readers
-(`pos ≤ data.len`), which every `pos = 0` reader in `parse_one` satisfies;
-`read_slice_spec` further shows the read *fits* in this context, so the Rust
-result is `Ok`. `ptr_align` was **not** attempted (prioritised `parse_one`, per
-plan; it remains `sorry` in `NoPanic.lean` with the Try-trait note from the
-previous stage).
+mechanically. The reader specs are stated for the `pos = 0` readers `parse_one`
+actually uses, on which every op is unconditionally total. Only `size_of`-dependent
+theorems carry the opaque-`size_of` assumption (see AENEAS-REPORT); `parse_one`
+inherits it via `type_to_size`. `ptr_align` was **not** attempted (prioritised
+`parse_one`, per plan; it remains `sorry` in `NoPanic.lean` with the Try-trait
+note from the previous stage).
 
 ---
 
-## 6. Distance to a fully machine-checked `parse_one`
+## 6. `parse_one_no_panic`: how it was closed
 
-**Very small, and not mathematical.** The proof drives `parse_one` by symbolic
-execution (`step*`) using the proven sub-specs, then case-splits the `?`/`branch`
-control flow. It reaches a **single goal that is fully concrete and has no
-remaining fail source**: `read_slice` has returned `Ok ()` (proved), so the
-closure's `?` takes `Continue`; the only branches left are the tag check
-(`if o.isNone`) and `skip`'s Ok/Err, and *every* arm returns `ok (…)`.
+The proof drives `parse_one` by symbolic execution (`step*`) using the proven
+sub-specs, then case-splits the `?`/`branch` control flow; every arm ends in
+`ok (…)`, so there is no fail source, only the opaque `size_of`.
 
-The last goal is not discharged because of a **tactic-level reduction gap**, not
-a missing fact: Aeneas's `step` does not reduce the tuple-pattern monadic bind
-`let (r, _, s2) := (Ok (), rd, s2)` that arises from a reader op returning a
-multi-component result, and the obvious reducers do not help — `simp only []` /
-`dsimp only []` make no progress on it, while `dsimp only` (unfolding reducibles)
-unfolds the crate defs (`size`→`hdr_type`→`type_to_size`'s 9-way tag match) and
-blows the heartbeat budget; `grind` fails to set up. Every fail obligation the
-goal could have is already closed by the sub-lemmas, so the theorem is true and
-its no-panic content is established; finishing it needs either a small custom
-reduction lemma for that bind shape or an upstream `step` improvement, on the
-order of hours, not a new proof idea.
+The one obstruction was tactical, and the fix is a **spec-shape** change, not new
+mathematics. `step`'s output-destructuring (`introOutputs`) only fires for spec
+applications with **no side goal**; the earlier reader specs carried a
+`pos ≤ data.len` precondition, so `step` applied them but left the tuple result as
+an unreducible pattern-`let` (`let (r,_,s2) := (Ok (), rd, s2)`). Because
+`parse_one` only ever uses `pos = 0` readers — on which `len`'s `data.len - 0`
+cannot underflow and `read_slice`/`skip` return a clean `Err` *value* — the reader
+specs were restated **precondition-free** for `⟨data, 0#usize⟩`. `step*` then
+destructures them cleanly, exactly as in Aeneas's own tuple-bind tests
+(`Tactic/Step/Tests/UncurryBind.lean`). Two tuple results whose specs still carry
+side goals (`index_mut`, and `read_slice` under `step`'s bookkeeping) are
+destructured by one `obtain` each; the residual `branch` cascade is discharged by
+`simp only [] at *` (matcher-on-constructor iota) + `step*` + `casesm`/`split`.
 
 **Bottom line.** The union barrier that blocked the previous stage is gone: the
 re-modelled deserializer translates through the whole toolchain, and no-panic is
-machine-checked for the accessors, the reader primitives, the validators, and
-`size`/`type_to_size`. `parse_one`'s no-panic is reduced to one mechanical
-tactic step over concrete, fail-free control flow.
+machine-checked end-to-end — accessors, reader primitives, validators,
+`size`/`type_to_size`, and the maintainer's target `parse_one` — all `sorryAx`-free
+(modulo the opaque `size_of` axiom for the size-dependent ones).
 
 ---
 

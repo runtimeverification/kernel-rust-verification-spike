@@ -72,27 +72,26 @@ theorem noPanic_of_spec {α} {m : Result α} (h : m ⦃ fun _ => True ⦄) :
    uses readers with `pos = 0`, which trivially satisfy this.
    ===================================================================== -/
 
+-- `parse_one` only ever uses readers with `pos = 0`. On such a reader every op
+-- is UNCONDITIONALLY total: `len`'s subtraction is `data.len - 0` (no underflow),
+-- and `read_slice`/`skip` return a clean `Err` *value* rather than failing when
+-- the length is exceeded. Precondition-free specs let `step*` apply them and
+-- destructure their tuple results (its `introOutputs` fires for spec applications
+-- with no side goal), exactly as in Aeneas's own tuple-bind tests.
 @[local step]
-theorem len_spec (r : SliceReader) (h : r.pos.val ≤ r.data.length) :
-    SliceReader.len r ⦃ fun v => v.val = r.data.length - r.pos.val ⦄ := by
-  unfold SliceReader.len
-  step*
+theorem len_zero (data : Slice Std.U8) :
+    SliceReader.len ⟨data, 0#usize⟩ ⦃ fun v => v.val = data.length ⦄ := by
+  unfold SliceReader.len; step*
 
 @[local step]
-theorem read_slice_spec (r : SliceReader) (out : Slice Std.U8)
-    (h : r.pos.val ≤ r.data.length)
-    (hn : out.length ≤ r.data.length - r.pos.val) :
-    -- In this context the read always fits, so the Rust result is `Ok ()`; this
-    -- lets the caller's `?` reduce to `Continue` without a case-split.
-    SliceReader.read_slice r out ⦃ res _b _c => res = core.result.Result.Ok () ⦄ := by
-  unfold SliceReader.read_slice
-  step* <;> scalar_tac
+theorem read_slice_zero (data out : Slice Std.U8) :
+    SliceReader.read_slice ⟨data, 0#usize⟩ out ⦃ _a _b _c => True ⦄ := by
+  unfold SliceReader.read_slice; step*
 
 @[local step]
-theorem skip_spec (r : SliceReader) (n : Std.Usize) (h : r.pos.val ≤ r.data.length) :
-    SliceReader.skip r n ⦃ _a _b => True ⦄ := by
-  unfold SliceReader.skip
-  step*
+theorem skip_zero (data : Slice Std.U8) (n : Std.Usize) :
+    SliceReader.skip ⟨data, 0#usize⟩ n ⦃ _a _b => True ⦄ := by
+  unfold SliceReader.skip; step*
 
 theorem hdr_type_no_panic (self : BinderObjectBytes) : ∃ v, self.hdr_type = ok v :=
   noPanic_of_spec (by unfold BinderObjectBytes.hdr_type; step*)
@@ -173,7 +172,7 @@ theorem size_spec (self : BinderObjectBytes)
    arithmetic side-goals dispatched by `scalar_tac`.
    ===================================================================== -/
 
-set_option maxHeartbeats 2000000 in
+set_option maxHeartbeats 4000000 in
 theorem parse_one_no_panic
     (hsz : ∀ T, ∃ n, core.mem.size_of T = ok n) (bytes : Slice Std.U8) :
     ∃ r, parse_one bytes = ok r := by
@@ -182,42 +181,28 @@ theorem parse_one_no_panic
     BinderObjectBytes.read_from.closure.Insts.CoreOpsFunctionFnOnceTupleArrayU840ResultArrayU840Error
     BinderObjectBytes.read_from.closure.Insts.CoreOpsFunctionFnOnceTupleArrayU840ResultArrayU840Error.call_once
     SliceReader.new SliceReader.clone_reader
-  -- Symbolic execution: `step` runs the monadic program via the folded specs
-  -- above; `casesm` destructures `index_mut`'s (slice, write-back) pair and
-  -- case-splits the opaque `Result`s returned by the reader ops so the `?`
-  -- (`branch`) matches reduce; `split` handles the `is_none` `if`. `assumption`
-  -- discharges the `size_of`/well-formedness side conditions of the specs. Every
-  -- path ends in `ok (...)`.
+  -- `index_mut`'s and `read_slice`'s specs return tuples, but `step`'s output-
+  -- destructuring leaves the (slice, write-back) / (result, reader, slice) pair as
+  -- a single hypothesis here; destructure them by hand so `step` can continue.
   step*
   obtain ⟨s1, ib⟩ := x
+  -- byte-content facts about the filled array are irrelevant to no-panic, and
+  -- keeping them makes the reducers evaluate the 40-byte array.
+  clear x_post1 x_post2 x_post3
   step*
   obtain ⟨r, rd, s2⟩ := x
-  -- Drop the byte-content facts about the filled array; no-panic needs only that
-  -- the values exist, and keeping them makes reducers evaluate the 40-byte array.
-  clear x_post1 x_post2 x_post3
-  -- Tail is now small and folded (hdr_type/type_to_size/size stay as specs).
-  -- Each round: run the monad (`step`), reduce concrete `branch`/tuple matches
-  -- (`subst_vars`/`dsimp`), `split` the tag `if`, `casesm` the one genuine Ok/Err
-  -- from `skip`. Every path ends in `ok (...)`. Bounded by the control-flow depth.
-  repeat' first
-    | done
-    | subst_vars
-    | (simp only [])
-    | split
-    | (casesm core.result.Result _ _)
-    | step
-    | scalar_tac
-    | trivial
-  -- What remains is a single, fully concrete control-flow goal: `read_slice`
-  -- returned `Ok ()` (established above), so the closure's `?` takes the
-  -- `Continue` arm; the only genuine branches left are the tag check
-  -- (`if o.isNone`) and `skip`'s Ok/Err — every arm ends in `ok (...)`, with NO
-  -- remaining fail source (all discharged by the specs above). The obstruction
-  -- is purely tactical: `step` does not reduce the tuple-pattern monadic bind
-  -- `let (r,_,s2) := (Ok (), rd, s2)` produced by the multi-component reader
-  -- result, and neither `simp only []`/`dsimp only []` (no progress) nor
-  -- `dsimp only` (unfolds the crate defs → heartbeat blow-up) reduce it cheaply.
-  -- See REMODEL-REPORT.md §"distance". The mathematical content is complete.
-  all_goals sorry
+  step*
+  cases r
+  -- What remains is the `?`/`branch` cascade (the tag check `if o.isNone`, and
+  -- `skip`'s Ok/Err). Each round: reduce the `branch`/tuple matches over
+  -- constructors (`simp only [] at *`), run the monad (`step*`), destructure
+  -- `skip`'s result pair / case its `Result` (`casesm`), split the `if` (`split`).
+  -- Every arm ends in `ok (...)`. Bounded by the control-flow depth.
+  iterate 12
+    (all_goals (try (simp only [] at *));
+     all_goals (try step*);
+     all_goals (try (casesm _ × _));
+     all_goals (try (casesm core.result.Result _ _));
+     all_goals (try split))
 
 end NoPanicRemodel

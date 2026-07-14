@@ -1,15 +1,15 @@
 # Aeneas → Lean 4: Binder deserializer
 
-**Goal.** Run Aeneas on the extracted Binder deserializer
+Run Aeneas on the extracted Binder deserializer
 (`drivers/android/binder/allocation.rs`, v7.2-rc2) targeting Lean 4, and assess
 the distance to the maintainer's no-panic property: for all inputs from
 userspace, the code must not panic.
 
-**Result.** Aeneas does not support `union` types, and the deserializer is built
-on union type-punning. Translation aborts on the union declarations; every
-function that transitively touches the union (`read_from`, `read_from_inner`,
-`as_ref`, `size`, `parse_one`) gets no Lean at all. The union-free validators do
-translate, and no-panic is proved for three of them.
+Aeneas does not support `union` types, and the deserializer is built on union
+type-punning. Translation aborts on the union declarations; every function that
+transitively touches the union (`read_from`, `read_from_inner`, `as_ref`,
+`size`, `parse_one`) gets no Lean. The union-free validators do translate, and
+no-panic is proved for three of them.
 
 Upstream issue: https://github.com/AeneasVerif/aeneas/issues/1199
 
@@ -43,35 +43,35 @@ Aeneas puts every function in its `Result` monad: `ok v | fail e | div`. A panic
 (overflow, division by zero, `unwrap` on `None`, `unreachable_unchecked`) is
 exactly `fail`. No-panic is `∀ inputs, ∃ v, f inputs = ok v`. This is orthogonal
 to the Rust-level `Result`: a clean EINVAL rejection is `ok (Err EINVAL)`, still
-`ok` at the panic level — so "reject invalid input" and "never panic" are
-properly distinguished.
+`ok` at the panic level, so "reject invalid input" and "never panic" stay
+distinct.
 
 ## No-panic theorems ([lean/NoPanic.lean](lean/NoPanic.lean))
 
 | Theorem | Status |
 |---|---|
 | `size_check_no_panic` | **Proved**, unconditional |
-| `is_aligned_no_panic` (`to ≠ 0`) | **Proved**; companion proves it genuinely panics on `to = 0`, so the precondition is necessary (in the kernel, callers always pass nonzero constants) |
-| `type_to_size_no_panic` | **Proved** modulo one axiom: `core.mem.size_of` is emitted as an opaque fallible axiom, not a concrete constant |
-| `ptr_align_no_panic` | `sorry` — reachable, needs a manual model of the `Try` trait for `Option`; hours, not a blocker |
-| `parse_one_no_panic` | **Cannot be stated** — `parse_one` has no Lean definition |
+| `is_aligned_no_panic` (`to ≠ 0`) | **Proved**; companion proves it panics on `to = 0`, so the precondition is necessary (in the kernel, callers always pass nonzero constants) |
+| `type_to_size_no_panic` | **Proved** modulo one axiom: `core.mem.size_of` is an opaque fallible axiom, so its totality is assumed |
+| `ptr_align_no_panic` | `sorry`: needs a manual model of the `Try` trait for `Option` |
+| `parse_one_no_panic` | Cannot be stated: `parse_one` has no Lean definition in this crate |
 
 Proved theorems verified `sorry`-free via `#print axioms`.
 
 ## Distance to no-panic on `parse_one`
 
-Blocked, not hard: the parsing core has no Lean representation, so no proof
-effort closes the gap. Three ways forward:
+The parsing core has no Lean representation, so no proof effort closes the gap
+at this stage. Three ways forward:
 
-1. **Upstream union support in Aeneas** (issue #1199) — the clean fix; nontrivial,
+1. Upstream union support in Aeneas (issue #1199). The clean fix, and nontrivial:
    unions interact with the borrow/region model.
-2. **Union-free re-modelling** — `BinderObject` as `[u8; 40]` plus typed
-   accessors, with the type-pun invariants ("all bytes initialized, tag valid")
-   proved as explicit Lean propositions. Honest cost: the SAFETY-comment
-   invariants become manual proof obligations. This is our current plan.
-3. **Axiomatizing** the union functions as opaque Lean — fastest to green, but
-   assumes away exactly the places (`unreachable_unchecked`, `assume_init`) where
-   a panic would hide. Not acceptable for a security property.
+2. Union-free re-modelling: `BinderObject` as `[u8; 40]` plus typed accessors,
+   with the type-pun invariants ("all bytes initialized, tag valid") proved as
+   explicit Lean propositions. The cost is that the SAFETY-comment invariants
+   become manual proof obligations. Done in [REMODEL-REPORT.md](REMODEL-REPORT.md).
+3. Axiomatizing the union functions as opaque Lean. Fastest to green, but it
+   assumes away the places (`unreachable_unchecked`, `assume_init`) where a panic
+   would hide. Unsuitable for a security property.
 
 ## Reproduce
 
@@ -88,5 +88,5 @@ cd <repo>/lean && lake build
 ```
 
 Environment: Aeneas `c2015b86`, Charon `909ff09a` (v0.1.220), Lean/mathlib
-`v4.31.0`, stable rustc 1.94.0. Note: Aeneas requires `--preset=aeneas` at
-Charon extraction time.
+`v4.31.0`, stable rustc 1.94.0. Aeneas requires `--preset=aeneas` at Charon
+extraction time.

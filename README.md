@@ -4,36 +4,37 @@ Can the Linux kernel's Rust Binder driver be verified post hoc, through the
 Charon/Aeneas toolchain (Rust → LLBC → Lean 4)? Target property, from the
 Binder maintainer: for all inputs from userspace, the code must not panic.
 
-**Status.**
+## Status
+
 - Charon extracts the BinderObject deserializer
   (drivers/android/binder/allocation.rs, v7.2-rc2) with zero changes to the
   parsing logic. Only the kernel environment (kernel crate, bindgen'd UAPI,
   userspace reader) is stubbed, marked `// SPIKE-STUB` in the source.
   Details: [CHARON-REPORT.md](CHARON-REPORT.md).
 - Aeneas rejects the union type-punning at the core of the deserializer, so
-  the parsing functions get no Lean at all. Upstream issue:
+  the parsing functions get no Lean. Upstream issue:
   https://github.com/AeneasVerif/aeneas/issues/1199
 - The union-free validators translate, and no-panic is proved for three of
   them (`size_check` unconditionally). Theorems: [lean/NoPanic.lean](lean/NoPanic.lean).
   Details: [AENEAS-REPORT.md](AENEAS-REPORT.md).
 - A union-free re-modelling (`[u8; 40]` + typed accessors, per
   [AeneasVerif/aeneas#1199](https://github.com/AeneasVerif/aeneas/issues/1199))
-  makes the **whole** deserializer translate to Lean, and the maintainer's
-  target is **proved**: `parse_one_no_panic` — for all byte inputs, `parse_one`
-  returns `ok`, never `fail` — machine-checked and `sorryAx`-free (modulo the
-  opaque `size_of` axiom). No-panic is likewise proved for the accessors, reader
-  primitives, `size`/`type_to_size`, and validators.
+  translates the whole deserializer to Lean and proves the maintainer's target.
+  `parse_one_no_panic` states that for all byte inputs `parse_one` returns `ok`,
+  never `fail`; it is machine-checked and `sorryAx`-free, modulo the opaque
+  `size_of` axiom. No-panic is also proved for the accessors, reader primitives,
+  `size`/`type_to_size`, and validators.
   Theorems: [lean/NoPanicRemodel.lean](lean/NoPanicRemodel.lean).
   Details: [REMODEL-REPORT.md](REMODEL-REPORT.md).
 
 ## Layout
 
-- `src/` — the extracted crate, parsing logic byte-for-byte from the kernel
-- `reduced/` — union-free subset (validators only) that Aeneas accepts
-- `remodel/` — union-free re-modelling of the full deserializer (`[u8; 40]` + accessors)
-- `lean/` — generated Lean 4 code + no-panic theorems (Lake project)
-- `llbc/` — Charon artifacts
-- `CHARON-REPORT.md`, `AENEAS-REPORT.md`, `REMODEL-REPORT.md` — results per stage
+- `src/`: the extracted crate, parsing logic byte-for-byte from the kernel
+- `reduced/`: union-free subset (validators only) that Aeneas accepts
+- `remodel/`: union-free re-modelling of the full deserializer (`[u8; 40]` + accessors)
+- `lean/`: generated Lean 4 code and no-panic theorems (Lake project)
+- `llbc/`: Charon artifacts
+- `CHARON-REPORT.md`, `AENEAS-REPORT.md`, `REMODEL-REPORT.md`: results per stage
 
 ## Reproduce
 
@@ -55,10 +56,11 @@ Kernel v7.2-rc2, Lean/mathlib v4.31.0, stable rustc 1.94.0. Aeneas requires
 ## Next
 
 - Discharge the opaque `size_of` axiom (model `core.mem.size_of` as a concrete
-  constant) so `parse_one_no_panic` depends only on the standard Lean axioms
-- Upstream union support in Aeneas (issue #1199) — the faithful alternative to
-  re-modelling, so the *original* deserializer verifies without the byte-array remodel
-- Coverage map: the rest of the kernel's Rust through both pipeline stages
+  constant) so `parse_one_no_panic` depends only on the standard Lean axioms.
+- Upstream union support in Aeneas (issue #1199). That is the faithful
+  alternative to re-modelling: the original deserializer would verify without the
+  byte-array remodel.
+- Coverage map: the rest of the kernel's Rust through both pipeline stages.
 
 ## Who
 
